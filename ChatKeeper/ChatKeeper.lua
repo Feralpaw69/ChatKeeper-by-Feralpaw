@@ -3,6 +3,7 @@ local ADDON = ...
 local DAY = 86400
 local db, sessionStart, lastMsg, lastT
 local replaying = false
+local lowCache = {} -- line index -> lower-case plain text, built on the first search
 local elvCH -- ElvUI chat module, if ElvUI chat is used
 local RawAdd = getmetatable(ChatFrame1).__index.AddMessage -- Blizzard method, skips every addon hook
 local defaults = { days = 7, max = 30000, replay = 500, chatLines = 2000, off = {} }
@@ -31,6 +32,7 @@ local function Trim()
     local new = {}
     for k = first, n do new[#new + 1] = L[k] end
     db.lines = new
+    wipe(lowCache)
     if sessionStart then sessionStart = max(1, sessionStart - (first - 1)) end
   end
 end
@@ -185,21 +187,63 @@ local function JumpToLine(k)
   return true
 end
 
-local function Fill(filter)
-  local smf, L, n = view.smf, db.lines, 0
-  smf:Clear(); view.shown = {}
-  filter = filter ~= "" and filter:lower() or nil
-  for k = 1, #L do
-    local t, _, c, m = Parse(L[k])
-    if t and (not filter or Plain(m):lower():find(filter, 1, true)) then
-      smf:AddMessage("|cff707070" .. date("%a %d.%m %H:%M", t) .. "|r " .. m, RGB(c))
-      n = n + 1; view.shown[n] = k
-    end
+-- The log window only ever draws the ~40 lines you can see, so opening it and searching stays smooth
+local ROWS = 40
+local function Render()
+  local smf, sh, L = view.smf, view.shown, db.lines
+  local n = #sh
+  view.pos = max(min(n, ROWS), min(view.pos or n, n))
+  smf:Clear()
+  for j = max(1, view.pos - ROWS + 1), view.pos do
+    local t, _, c, m = Parse(L[sh[j]])
+    if t then smf:AddMessage("|cff707070" .. date("%a %d.%m %H:%M", t) .. "|r " .. m, RGB(c)) end
   end
+  view.sliding = true
+  view.slider:SetMinMaxValues(min(n, ROWS), max(n, 1)); view.slider:SetValue(view.pos)
+  view.sliding = false
+  if n > ROWS then view.slider:Show() else view.slider:Hide() end
+end
+local function ScrollView(lines) -- positive = older
+  view.pos = (view.pos or 0) - lines
+  Render()
+  if view.textMode and view.FillText then view.FillText() end
+end
+
+local function Done(n)
+  view.searching = nil
   view.title:SetText(format("ChatKeeper - %d lines", n))
+  view.pos = n; Render()
   view.jump = nil
   if view.UpdateJump then view.UpdateJump() end
   if view.textMode and view.FillText then view.FillText() end
+end
+
+-- searching runs in small chunks over several frames, so the game never freezes
+local runner = CreateFrame("Frame")
+local function Fill(filter)
+  local L, sh = db.lines, {}
+  view.shown = sh
+  runner:SetScript("OnUpdate", nil)
+  if filter == "" then
+    for k = 1, #L do sh[k] = k end
+    return Done(#L)
+  end
+  local f, k = filter:lower(), 1
+  view.searching = true
+  view.title:SetText("ChatKeeper - searching...")
+  runner:SetScript("OnUpdate", function(self)
+    local stop = min(#L, k + 3000)
+    for i = k, stop do
+      local low = lowCache[i]
+      if not low then
+        low = Plain(L[i]:match("^%d+\t%u+\t%x+\t(.*)$") or ""):lower()
+        lowCache[i] = low
+      end
+      if low:find(f, 1, true) then sh[#sh + 1] = i end
+    end
+    k = stop + 1
+    if k > #L then self:SetScript("OnUpdate", nil); Done(#sh) end
+  end)
 end
 
 local tipTypes = { item = 1, spell = 1, enchant = 1, achievement = 1, quest = 1, talent = 1 }
@@ -218,8 +262,8 @@ local function ToggleView()
     end) end)
     local sl = view:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"); sl:SetPoint("RIGHT", s, "LEFT", -8, 0); sl:SetText("Search:")
     local smf = CreateFrame("ScrollingMessageFrame", nil, view)
-    smf:SetPoint("TOPLEFT", 10, -32); smf:SetPoint("BOTTOMRIGHT", -10, 10)
-    smf:SetFontObject(ChatFontNormal); smf:SetJustifyH("LEFT"); smf:SetFading(false); smf:SetMaxLines(db.max + 2500)
+    smf:SetPoint("TOPLEFT", 10, -32); smf:SetPoint("BOTTOMRIGHT", -30, 10)
+    smf:SetFontObject(ChatFontNormal); smf:SetJustifyH("LEFT"); smf:SetFading(false); smf:SetMaxLines(ROWS + 20)
     smf:EnableMouse(true); smf:EnableMouseWheel(true)
     if smf.SetHyperlinksEnabled then smf:SetHyperlinksEnabled(true) end
     smf:SetScript("OnHyperlinkClick", function(_, link, text, button) ChatFrame_OnHyperlinkShow(DEFAULT_CHAT_FRAME, link, text, button) end)
@@ -227,19 +271,32 @@ local function ToggleView()
       if tipTypes[link:match("^(%a+):") or ""] then GameTooltip:SetOwner(self, "ANCHOR_CURSOR"); GameTooltip:SetHyperlink(link); GameTooltip:Show() end
     end)
     smf:SetScript("OnHyperlinkLeave", function() GameTooltip:Hide() end)
-    smf:SetScript("OnMouseWheel", function(self, d)
-      if IsShiftKeyDown() then if d > 0 then self:ScrollToTop() else self:ScrollToBottom() end
-      else for _ = 1, 3 do if d > 0 then self:ScrollUp() else self:ScrollDown() end end end
-    end)
+    local function Wheel(_, d) ScrollView(IsShiftKeyDown() and d * 1e9 or d * 3) end
+    smf:SetScript("OnMouseWheel", Wheel)
     view.smf = smf
+    view.Scroll = ScrollView
+    -- scroll bar on the right (drag it to move through the whole week)
+    local sb = CreateFrame("Slider", nil, view)
+    sb:SetOrientation("VERTICAL"); sb:SetWidth(16)
+    sb:SetPoint("TOPRIGHT", -8, -34); sb:SetPoint("BOTTOMRIGHT", -8, 12)
+    local bg = sb:CreateTexture(nil, "BACKGROUND"); bg:SetAllPoints(); bg:SetTexture(1, 1, 1, .08)
+    sb:SetThumbTexture("Interface\\Buttons\\UI-ScrollBar-Knob")
+    sb:GetThumbTexture():SetWidth(18); sb:GetThumbTexture():SetHeight(24)
+    sb:SetValueStep(1); sb:EnableMouseWheel(true); sb:SetScript("OnMouseWheel", Wheel)
+    sb:SetScript("OnValueChanged", function(_, v)
+      if view.sliding then return end
+      view.pos = floor(v + .5); Render()
+    end)
+    sb:SetScript("OnMouseUp", function() if view.textMode and view.FillText then view.FillText() end end)
+    view.slider = sb
     view.shown = {}
 
     -- text mode: same lines as plain text in an edit box, so you can mark and Ctrl+C right here
     local tsf = CreateFrame("ScrollFrame", "ChatKeeperTextScroll", view, "UIPanelScrollFrameTemplate")
-    tsf:SetPoint("TOPLEFT", 10, -32); tsf:SetPoint("BOTTOMRIGHT", -30, 10); tsf:Hide()
+    tsf:SetPoint("TOPLEFT", 10, -32); tsf:SetPoint("BOTTOMRIGHT", -52, 10); tsf:Hide()
     local teb = CreateFrame("EditBox", nil, tsf)
     teb:SetMultiLine(true); teb:SetAutoFocus(false); teb:SetMaxLetters(0)
-    teb:SetFontObject(ChatFontNormal); teb:SetWidth(710); teb:SetHeight(400)
+    teb:SetFontObject(ChatFontNormal); teb:SetWidth(690); teb:SetHeight(400)
     teb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     local textNow, setting = "", false
     teb:SetScript("OnTextChanged", function(self) -- read only: undo any typing
@@ -248,11 +305,13 @@ local function ToggleView()
     tsf:SetScrollChild(teb)
     function view.FillText()
       local out, sh = {}, view.shown
-      for j = max(1, #sh - 999), #sh do
+      local last = view.pos or #sh
+      local first = max(1, last - 299)
+      for j = first, last do
         local t, _, _, m = Parse(db.lines[sh[j]])
         if t then out[#out + 1] = date("%a %d.%m %H:%M ", t) .. Plain(m) end
       end
-      if #sh > 1000 then tinsert(out, 1, "(only the newest 1000 lines - use Search to narrow it down)") end
+      if first > 1 then tinsert(out, 1, "(300 lines shown - scroll with the mouse wheel / bar on the right for older ones, or use Search)") end
       textNow = table.concat(out, "\n")
       setting = true; teb:SetText(textNow); setting = false
       tsf:UpdateScrollChildRect(); tsf:SetVerticalScroll(tsf:GetVerticalScrollRange())
@@ -280,7 +339,7 @@ local function ToggleView()
     end
     jb:SetScript("OnClick", function()
       local n = view.shown and #view.shown or 0
-      if n == 0 then return end
+      if n == 0 or view.searching then return end
       view.jump = (view.jump or 0) + 1
       if view.jump > n then view.jump = 1 end
       local k = view.shown[n - view.jump + 1]
@@ -371,6 +430,7 @@ local hovered, bound, holdDir, holdT
 local function ScrollHovered(dir, jump)
   local f = hovered
   if not f then return end
+  if view and f == view.smf then return ScrollView(jump and dir * 1e9 or dir) end
   if jump then if dir > 0 then f:ScrollToTop() else f:ScrollToBottom() end
   elseif dir > 0 then f:ScrollUp() else f:ScrollDown() end
 end
