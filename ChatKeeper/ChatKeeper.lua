@@ -251,6 +251,7 @@ local function ToggleView()
       else for _ = 1, 3 do if d > 0 then self:ScrollUp() else self:ScrollDown() end end end
     end)
     view.smf = smf
+    view.shown = {}
 
     -- text mode: same lines as plain text in an edit box, so you can mark and Ctrl+C right here
     local tsf = CreateFrame("ScrollFrame", "ChatKeeperTextScroll", view, "UIPanelScrollFrameTemplate")
@@ -292,12 +293,12 @@ local function ToggleView()
     local jb = CreateFrame("Button", nil, view, "UIPanelButtonTemplate")
     jb:SetWidth(100); jb:SetHeight(20); jb:SetPoint("RIGHT", tb, "LEFT", -6, 0)
     function view.UpdateJump()
-      local n = #view.shown
+      local n = view.shown and #view.shown or 0
       if n == 0 or ChatKeeperSearch:GetText() == "" then jb:SetText("Jump to chat"); jb:Disable()
       else jb:Enable(); jb:SetText(view.jump and format("Jump %d/%d", view.jump, n) or format("Jump (%d)", n)) end
     end
     jb:SetScript("OnClick", function()
-      local n = #view.shown
+      local n = view.shown and #view.shown or 0
       if n == 0 then return end
       view.jump = (view.jump or 0) + 1
       if view.jump > n then view.jump = 1 end
