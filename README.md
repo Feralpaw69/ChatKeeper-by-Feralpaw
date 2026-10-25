@@ -9,8 +9,8 @@ Lightweight chat log. Keeps **one week** of chat, puts it back into your chat ta
 - Rolling **7-day** history (hard cap 30,000 lines), older lines are deleted at login
 - Restores the last 500 lines per tab after login / reload, with a grey day + time stamp
 - Small **magnifier button** next to the chat (same size as the chat buttons) opens the search
-- `/ck` window with the full week: search as you type, **Text** mode (mark + Ctrl+C right in the window), **Jump to chat** (scrolls your chat tab to the found line), item tooltips, clickable links, **Copy** button (plain text)
-- Web links in chat become clickable – click to copy (Ctrl+C), Shift+click to paste into chat
+- `/ck` window with the full week: search as you type, **Copy** mode (plain text you mark + Ctrl+C right in the window, **Chat** switches back), **Jump to chat** (scrolls your chat tab to the found line), item tooltips, clickable links
+- Web links in chat become clickable – a click puts the link into your chat input, already marked, so Ctrl+C copies it
 - **Arrow keys scroll the chat** while the mouse is over it (Shift+Up/Down = top/bottom). Outside the chat the arrows move your character as usual; disabled in combat
 - Works alongside **ElvUI** (uses ElvUI's timestamps / URLs / max lines instead of fighting them), DBM, Twitch Emotes
 

@@ -118,7 +118,7 @@ local function AddURLFilter()
 end
 
 -- windows
-local view, copy
+local view
 local function Window(name, w, h)
   local f = CreateFrame("Frame", name, UIParent)
   f:SetWidth(w); f:SetHeight(h); f:SetPoint("CENTER"); f:SetFrameStrata("DIALOG"); f:SetClampedToScreen(true)
@@ -134,29 +134,20 @@ local function Window(name, w, h)
   return f
 end
 
-local function ShowCopy(text)
-  if not copy then
-    copy = Window("ChatKeeperCopy", 620, 320)
-    copy.title:SetText("Ctrl+C to copy, Esc to close")
-    copy:SetFrameStrata("FULLSCREEN_DIALOG"); copy:SetToplevel(true)
-    copy:SetBackdropColor(.05, .05, .05, 1)
-    local sf = CreateFrame("ScrollFrame", "ChatKeeperCopyScroll", copy, "UIPanelScrollFrameTemplate")
-    sf:SetPoint("TOPLEFT", 10, -30); sf:SetPoint("BOTTOMRIGHT", -30, 10)
-    local eb = CreateFrame("EditBox", nil, sf)
-    eb:SetMultiLine(true); eb:SetAutoFocus(false); eb:SetMaxLetters(0)
-    eb:SetFontObject(ChatFontNormal); eb:SetWidth(570); eb:SetHeight(270)
-    eb:SetScript("OnEscapePressed", function() copy:Hide() end)
-    sf:SetScrollChild(eb)
-    copy.eb = eb
-  end
-  copy:Show(); copy:Raise(); copy.eb:SetText(text); copy.eb:HighlightText(); copy.eb:SetFocus()
+-- web links: put the URL into the chat input, already marked, so Ctrl+C copies it
+local function URLToChat(url)
+  local eb = ChatFrameEditBox or (ChatEdit_GetActiveWindow and ChatEdit_GetActiveWindow())
+  if eb and eb:IsShown() then eb:Insert(url); return end
+  ChatFrame_OpenChat("")
+  eb = ChatFrameEditBox or (ChatEdit_GetActiveWindow and ChatEdit_GetActiveWindow())
+  if eb then eb:SetText(url); eb:HighlightText() end
 end
 
 local origSetItemRef = SetItemRef
 SetItemRef = function(link, text, button, ...)
   if type(link) == "string" and link:sub(1, 4) == "url:" then
     local url = link:sub(5)
-    if IsShiftKeyDown() and ChatEdit_InsertLink then ChatEdit_InsertLink(url) else ShowCopy(url) end
+    URLToChat(url)
     return
   end
   return origSetItemRef(link, text, button, ...)
@@ -226,16 +217,6 @@ local function ToggleView()
       if pending <= 0 then me:SetScript("OnUpdate", nil); if view:IsShown() then Fill(me:GetText()) end end
     end) end)
     local sl = view:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"); sl:SetPoint("RIGHT", s, "LEFT", -8, 0); sl:SetText("Search:")
-    local cb = CreateFrame("Button", nil, view, "UIPanelButtonTemplate")
-    cb:SetWidth(70); cb:SetHeight(20); cb:SetPoint("TOPRIGHT", -30, -6); cb:SetText("Copy")
-    cb:SetScript("OnClick", function()
-      local out, sh = {}, view.shown
-      for j = max(1, #sh - 499), #sh do
-        local t, _, _, m = Parse(db.lines[sh[j]])
-        if t then out[#out + 1] = date("%d.%m %H:%M ", t) .. Plain(m) end
-      end
-      ShowCopy(table.concat(out, "\n"))
-    end)
     local smf = CreateFrame("ScrollingMessageFrame", nil, view)
     smf:SetPoint("TOPLEFT", 10, -32); smf:SetPoint("BOTTOMRIGHT", -10, 10)
     smf:SetFontObject(ChatFontNormal); smf:SetJustifyH("LEFT"); smf:SetFading(false); smf:SetMaxLines(db.max + 2500)
@@ -277,21 +258,21 @@ local function ToggleView()
       tsf:UpdateScrollChildRect(); tsf:SetVerticalScroll(tsf:GetVerticalScrollRange())
     end
     local tb = CreateFrame("Button", nil, view, "UIPanelButtonTemplate")
-    tb:SetWidth(60); tb:SetHeight(20); tb:SetPoint("RIGHT", sl, "LEFT", -10, 0); tb:SetText("Text")
+    tb:SetWidth(70); tb:SetHeight(20); tb:SetPoint("TOPRIGHT", -30, -6); tb:SetText("Copy")
     tb:SetScript("OnClick", function(self)
       view.textMode = not view.textMode
-      if view.textMode then smf:Hide(); tsf:Show(); view.FillText(); self:SetText("Colors")
-      else tsf:Hide(); teb:ClearFocus(); smf:Show(); self:SetText("Text") end
+      if view.textMode then smf:Hide(); tsf:Show(); view.FillText(); self:SetText("Chat")
+      else tsf:Hide(); teb:ClearFocus(); smf:Show(); self:SetText("Copy") end
     end)
     tb:SetScript("OnEnter", function(self)
-      GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:SetText("Text mode")
-      GameTooltip:AddLine("Plain text you can mark and copy (Ctrl+C) right here", 1, 1, 1); GameTooltip:Show()
+      GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:SetText(view.textMode and "Back to chat view" or "Copy mode")
+      GameTooltip:AddLine(view.textMode and "Colours and clickable links again" or "Shows plain text you can mark and copy (Ctrl+C) right here", 1, 1, 1); GameTooltip:Show()
     end)
     tb:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- jump: scrolls the real chat tab to the found line (newest match first, click again for older ones)
     local jb = CreateFrame("Button", nil, view, "UIPanelButtonTemplate")
-    jb:SetWidth(100); jb:SetHeight(20); jb:SetPoint("RIGHT", tb, "LEFT", -6, 0)
+    jb:SetWidth(100); jb:SetHeight(20); jb:SetPoint("RIGHT", sl, "LEFT", -10, 0)
     function view.UpdateJump()
       local n = view.shown and #view.shown or 0
       if n == 0 or ChatKeeperSearch:GetText() == "" then jb:SetText("Jump to chat"); jb:Disable()
