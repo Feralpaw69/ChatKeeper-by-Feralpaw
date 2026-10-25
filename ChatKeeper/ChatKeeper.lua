@@ -182,7 +182,13 @@ local function ToggleView()
     s:SetWidth(180); s:SetHeight(20); s:SetAutoFocus(false); s:SetPoint("TOPRIGHT", -112, -6)
     s:SetScript("OnEnterPressed", function(self) self:ClearFocus(); Fill(self:GetText()) end)
     s:SetScript("OnEscapePressed", function(self) self:SetText(""); self:ClearFocus(); Fill("") end)
-    local sl = view:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"); sl:SetPoint("RIGHT", s, "LEFT", -8, 0); sl:SetText("Search (Enter):")
+    -- search while typing (short delay so it doesn't run on every key)
+    local pending = 0
+    s:SetScript("OnTextChanged", function(self) pending = .4; self:SetScript("OnUpdate", function(me, el)
+      pending = pending - el
+      if pending <= 0 then me:SetScript("OnUpdate", nil); if view:IsShown() then Fill(me:GetText()) end end
+    end) end)
+    local sl = view:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"); sl:SetPoint("RIGHT", s, "LEFT", -8, 0); sl:SetText("Suche:")
     local cb = CreateFrame("Button", nil, view, "UIPanelButtonTemplate")
     cb:SetWidth(70); cb:SetHeight(20); cb:SetPoint("TOPRIGHT", -30, -6); cb:SetText("Copy")
     cb:SetScript("OnClick", function()
@@ -210,6 +216,38 @@ local function ToggleView()
     view.smf = smf
   end
   if view:IsShown() then view:Hide() else view:Show(); Fill(ChatKeeperSearch:GetText()) end
+end
+
+-- small magnifier button next to the chat (between the friends and the chat-menu button)
+local function OpenSearch()
+  if not (view and view:IsShown()) then ToggleView() end
+  ChatKeeperSearch:SetFocus(); ChatKeeperSearch:HighlightText()
+end
+local function CreateSearchButton()
+  if ChatKeeperSearchButton then return end
+  local menu = ChatFrameMenuButton
+  local useMenu = menu and menu:IsShown()
+  local w = useMenu and menu:GetWidth() or 26
+  local h = useMenu and menu:GetHeight() or 26
+  local b = CreateFrame("Button", "ChatKeeperSearchButton", UIParent)
+  b:SetWidth(w); b:SetHeight(h); b:SetFrameStrata(useMenu and menu:GetFrameStrata() or "MEDIUM")
+  if useMenu then b:SetPoint("BOTTOM", menu, "TOP", 0, 4)
+  else b:SetPoint("BOTTOMRIGHT", ChatFrame1, "BOTTOMLEFT", -4, 0) end
+  b:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+    edgeSize = 10, insets = { left = 2, right = 2, top = 2, bottom = 2 } })
+  b:SetBackdropColor(.08, .05, .02, .9); b:SetBackdropBorderColor(.55, .45, .2)
+  local icon = b:CreateTexture(nil, "ARTWORK")
+  icon:SetTexture("Interface\\Minimap\\Tracking\\None") -- magnifier
+  icon:SetPoint("TOPLEFT", 5, -5); icon:SetPoint("BOTTOMRIGHT", -5, 5)
+  b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+  b:SetScript("OnMouseDown", function() icon:SetPoint("TOPLEFT", 6, -6); icon:SetPoint("BOTTOMRIGHT", -4, 4) end)
+  b:SetScript("OnMouseUp", function() icon:SetPoint("TOPLEFT", 5, -5); icon:SetPoint("BOTTOMRIGHT", -5, 5) end)
+  b:SetScript("OnClick", OpenSearch)
+  b:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetText("Chat durchsuchen")
+    GameTooltip:AddLine("Durchsucht den Chat der letzten 7 Tage (/ck)", 1, 1, 1); GameTooltip:Show()
+  end)
+  b:SetScript("OnLeave", function() GameTooltip:Hide() end)
 end
 
 SLASH_CHATKEEPER1, SLASH_CHATKEEPER2 = "/chatkeeper", "/ck"
@@ -329,6 +367,7 @@ ev:SetScript("OnEvent", function(self, e, a)
       if wait > 0 then return end
       s:SetScript("OnUpdate", nil)
       AddURLFilter()
+      pcall(CreateSearchButton)
       if db.replay > 0 then
         local ok, err = pcall(Restore)
         replaying = false
