@@ -162,6 +162,38 @@ SetItemRef = function(link, text, button, ...)
   return origSetItemRef(link, text, button, ...)
 end
 
+-- scroll a real chat tab so log line k is visible (a few lines above the bottom)
+local function JumpToLine(k)
+  local L = db.lines
+  local _, fr = Parse(L[k] or "")
+  if not fr then return false, "line not found" end
+  -- prefer the tab you are looking at, else the first tab that showed this line
+  local target
+  for p = 1, #fr do
+    local i = fr:byte(p) - 64
+    local f = _G["ChatFrame" .. i]
+    if f and not db.off[i] and not IsCL(f) and (not target or f:IsVisible()) then target = i end
+  end
+  if not target then return false, "that line's chat tab is not logged any more" end
+  local f, c = _G["ChatFrame" .. target], string.char(64 + target)
+  if k < sessionStart and db.replay == 0 then return false, "that line is from an earlier session and chat restore is off (/ck replay)" end
+  -- count how many messages of this tab came after it
+  local below = 0
+  for j = k + 1, #L do
+    local fr2 = L[j]:match("^%d+\t(%u+)")
+    if fr2 and fr2:find(c, 1, true) then below = below + 1 end
+  end
+  if k < sessionStart and sessionStart <= #L + 1 then below = below + 1 end -- the "older lines restored" marker
+  if f.GetNumMessages and below >= f:GetNumMessages() then
+    return false, "that line is older than what your chat tab still holds - it is only in the /ck log"
+  end
+  if not f:IsVisible() and FCF_SelectDockFrame and f.isDocked then FCF_SelectDockFrame(f) end
+  local off = max(0, below - 4)
+  f:ScrollToBottom()
+  if f.SetScrollOffset then f:SetScrollOffset(off) else for _ = 1, off do f:ScrollUp() end end
+  return true
+end
+
 local function Fill(filter)
   local smf, L, n = view.smf, db.lines, 0
   smf:Clear(); view.shown = {}
@@ -174,6 +206,9 @@ local function Fill(filter)
     end
   end
   view.title:SetText(format("ChatKeeper - %d lines", n))
+  view.jump = nil
+  if view.UpdateJump then view.UpdateJump() end
+  if view.textMode and view.FillText then view.FillText() end
 end
 
 local tipTypes = { item = 1, spell = 1, enchant = 1, achievement = 1, quest = 1, talent = 1 }
@@ -216,6 +251,67 @@ local function ToggleView()
       else for _ = 1, 3 do if d > 0 then self:ScrollUp() else self:ScrollDown() end end end
     end)
     view.smf = smf
+
+    -- text mode: same lines as plain text in an edit box, so you can mark and Ctrl+C right here
+    local tsf = CreateFrame("ScrollFrame", "ChatKeeperTextScroll", view, "UIPanelScrollFrameTemplate")
+    tsf:SetPoint("TOPLEFT", 10, -32); tsf:SetPoint("BOTTOMRIGHT", -30, 10); tsf:Hide()
+    local teb = CreateFrame("EditBox", nil, tsf)
+    teb:SetMultiLine(true); teb:SetAutoFocus(false); teb:SetMaxLetters(0)
+    teb:SetFontObject(ChatFontNormal); teb:SetWidth(710); teb:SetHeight(400)
+    teb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    local textNow, setting = "", false
+    teb:SetScript("OnTextChanged", function(self) -- read only: undo any typing
+      if not setting and self:GetText() ~= textNow then setting = true; self:SetText(textNow); setting = false end
+    end)
+    tsf:SetScrollChild(teb)
+    function view.FillText()
+      local out, sh = {}, view.shown
+      for j = max(1, #sh - 999), #sh do
+        local t, _, _, m = Parse(db.lines[sh[j]])
+        if t then out[#out + 1] = date("%a %d.%m %H:%M ", t) .. Plain(m) end
+      end
+      if #sh > 1000 then tinsert(out, 1, "(only the newest 1000 lines - use Search to narrow it down)") end
+      textNow = table.concat(out, "\n")
+      setting = true; teb:SetText(textNow); setting = false
+      tsf:UpdateScrollChildRect(); tsf:SetVerticalScroll(tsf:GetVerticalScrollRange())
+    end
+    local tb = CreateFrame("Button", nil, view, "UIPanelButtonTemplate")
+    tb:SetWidth(60); tb:SetHeight(20); tb:SetPoint("RIGHT", sl, "LEFT", -10, 0); tb:SetText("Text")
+    tb:SetScript("OnClick", function(self)
+      view.textMode = not view.textMode
+      if view.textMode then smf:Hide(); tsf:Show(); view.FillText(); self:SetText("Colors")
+      else tsf:Hide(); teb:ClearFocus(); smf:Show(); self:SetText("Text") end
+    end)
+    tb:SetScript("OnEnter", function(self)
+      GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:SetText("Text mode")
+      GameTooltip:AddLine("Plain text you can mark and copy (Ctrl+C) right here", 1, 1, 1); GameTooltip:Show()
+    end)
+    tb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- jump: scrolls the real chat tab to the found line (newest match first, click again for older ones)
+    local jb = CreateFrame("Button", nil, view, "UIPanelButtonTemplate")
+    jb:SetWidth(100); jb:SetHeight(20); jb:SetPoint("RIGHT", tb, "LEFT", -6, 0)
+    function view.UpdateJump()
+      local n = #view.shown
+      if n == 0 or ChatKeeperSearch:GetText() == "" then jb:SetText("Jump to chat"); jb:Disable()
+      else jb:Enable(); jb:SetText(view.jump and format("Jump %d/%d", view.jump, n) or format("Jump (%d)", n)) end
+    end
+    jb:SetScript("OnClick", function()
+      local n = #view.shown
+      if n == 0 then return end
+      view.jump = (view.jump or 0) + 1
+      if view.jump > n then view.jump = 1 end
+      local k = view.shown[n - view.jump + 1]
+      local ok, msg = JumpToLine(k)
+      view.UpdateJump()
+      if not ok then P(msg) end
+    end)
+    jb:SetScript("OnEnter", function(self)
+      GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:SetText("Jump to chat")
+      GameTooltip:AddLine("Scrolls your chat tab to the found line. Click again for the next older match.", 1, 1, 1, true); GameTooltip:Show()
+    end)
+    jb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    view.UpdateJump()
   end
   if view:IsShown() then view:Hide() else view:Show(); Fill(ChatKeeperSearch:GetText()) end
 end
