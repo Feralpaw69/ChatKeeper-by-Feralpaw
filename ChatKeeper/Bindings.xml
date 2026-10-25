@@ -1,0 +1,6 @@
+<Bindings>
+  <Binding name="CHATKEEPER_UP" header="CHATKEEPER" runOnUp="true">ChatKeeper_Key(1, false, keystate)</Binding>
+  <Binding name="CHATKEEPER_DOWN" runOnUp="true">ChatKeeper_Key(-1, false, keystate)</Binding>
+  <Binding name="CHATKEEPER_TOP" runOnUp="true">ChatKeeper_Key(1, true, keystate)</Binding>
+  <Binding name="CHATKEEPER_BOTTOM" runOnUp="true">ChatKeeper_Key(-1, true, keystate)</Binding>
+</Bindings>

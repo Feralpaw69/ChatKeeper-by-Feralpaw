@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: ChatKeeper
+## Notes: Keeps 7 days of chat, restores it after login/reload, clickable + copyable links
+## Author: feralpaw
+## Version: 1.0
+## SavedVariables: ChatKeeperDB
+
+ChatKeeper.lua
