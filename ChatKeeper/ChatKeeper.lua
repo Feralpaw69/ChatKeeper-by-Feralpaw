@@ -138,6 +138,8 @@ local function ShowCopy(text)
   if not copy then
     copy = Window("ChatKeeperCopy", 620, 320)
     copy.title:SetText("Ctrl+C to copy, Esc to close")
+    copy:SetFrameStrata("FULLSCREEN_DIALOG"); copy:SetToplevel(true)
+    copy:SetBackdropColor(.05, .05, .05, 1)
     local sf = CreateFrame("ScrollFrame", "ChatKeeperCopyScroll", copy, "UIPanelScrollFrameTemplate")
     sf:SetPoint("TOPLEFT", 10, -30); sf:SetPoint("BOTTOMRIGHT", -30, 10)
     local eb = CreateFrame("EditBox", nil, sf)
@@ -147,7 +149,7 @@ local function ShowCopy(text)
     sf:SetScrollChild(eb)
     copy.eb = eb
   end
-  copy:Show(); copy.eb:SetText(text); copy.eb:HighlightText(); copy.eb:SetFocus()
+  copy:Show(); copy:Raise(); copy.eb:SetText(text); copy.eb:HighlightText(); copy.eb:SetFocus()
 end
 
 local origSetItemRef = SetItemRef
@@ -188,7 +190,7 @@ local function ToggleView()
       pending = pending - el
       if pending <= 0 then me:SetScript("OnUpdate", nil); if view:IsShown() then Fill(me:GetText()) end end
     end) end)
-    local sl = view:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"); sl:SetPoint("RIGHT", s, "LEFT", -8, 0); sl:SetText("Suche:")
+    local sl = view:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"); sl:SetPoint("RIGHT", s, "LEFT", -8, 0); sl:SetText("Search:")
     local cb = CreateFrame("Button", nil, view, "UIPanelButtonTemplate")
     cb:SetWidth(70); cb:SetHeight(20); cb:SetPoint("TOPRIGHT", -30, -6); cb:SetText("Copy")
     cb:SetScript("OnClick", function()
@@ -226,26 +228,44 @@ end
 local function CreateSearchButton()
   if ChatKeeperSearchButton then return end
   local menu = ChatFrameMenuButton
-  local useMenu = menu and menu:IsShown()
-  local w = useMenu and menu:GetWidth() or 26
-  local h = useMenu and menu:GetHeight() or 26
+  local useMenu = menu and menu:IsShown() and menu:GetNormalTexture()
   local b = CreateFrame("Button", "ChatKeeperSearchButton", UIParent)
-  b:SetWidth(w); b:SetHeight(h); b:SetFrameStrata(useMenu and menu:GetFrameStrata() or "MEDIUM")
-  if useMenu then b:SetPoint("BOTTOM", menu, "TOP", 0, 4)
-  else b:SetPoint("BOTTOMRIGHT", ChatFrame1, "BOTTOMLEFT", -4, 0) end
-  b:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    edgeSize = 10, insets = { left = 2, right = 2, top = 2, bottom = 2 } })
-  b:SetBackdropColor(.08, .05, .02, .9); b:SetBackdropBorderColor(.55, .45, .2)
-  local icon = b:CreateTexture(nil, "ARTWORK")
+  local holder = CreateFrame("Frame", nil, b) -- icon sits on a child frame so it draws above the button art
+  holder:SetAllPoints()
+  local icon = holder:CreateTexture(nil, "OVERLAY")
   icon:SetTexture("Interface\\Minimap\\Tracking\\None") -- magnifier
-  icon:SetPoint("TOPLEFT", 5, -5); icon:SetPoint("BOTTOMRIGHT", -5, 5)
-  b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-  b:SetScript("OnMouseDown", function() icon:SetPoint("TOPLEFT", 6, -6); icon:SetPoint("BOTTOMRIGHT", -4, 4) end)
-  b:SetScript("OnMouseUp", function() icon:SetPoint("TOPLEFT", 5, -5); icon:SetPoint("BOTTOMRIGHT", -5, 5) end)
+  icon:SetDesaturated(true); icon:SetVertexColor(1, .82, 0) -- same yellow as the other chat icons
+  if useMenu then
+    -- copy the size, frame and highlight of the chat menu (speech bubble) button so it looks the same
+    b:SetWidth(menu:GetWidth()); b:SetHeight(menu:GetHeight())
+    b:SetFrameStrata(menu:GetFrameStrata()); b:SetFrameLevel(menu:GetFrameLevel())
+    b:SetPoint("BOTTOM", menu, "TOP", 0, 2)
+    b:SetNormalTexture(menu:GetNormalTexture():GetTexture())
+    if menu:GetPushedTexture() then b:SetPushedTexture(menu:GetPushedTexture():GetTexture()) end
+    if menu:GetHighlightTexture() then b:SetHighlightTexture(menu:GetHighlightTexture():GetTexture(), "ADD") end
+    -- paint over the bubble so only the round frame of the button is left
+    local cover = b:CreateTexture(nil, "OVERLAY")
+    cover:SetTexture(1, 1, 1, 1); cover:SetGradient("VERTICAL", .02, .02, .02, .10, .09, .07)
+    cover:SetPoint("TOPLEFT", 6, -6); cover:SetPoint("BOTTOMRIGHT", -6, 6)
+  else
+    b:SetWidth(32); b:SetHeight(32)
+    b:SetPoint("BOTTOMRIGHT", ChatFrame1, "BOTTOMLEFT", -4, 0)
+    b:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+      edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 } })
+    b:SetBackdropColor(.05, .05, .05, 1); b:SetBackdropBorderColor(.6, .6, .6)
+    b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+  end
+  local function Place(down)
+    local o = down and 1 or 0
+    icon:ClearAllPoints(); icon:SetPoint("TOPLEFT", 7 + o, -7 - o); icon:SetPoint("BOTTOMRIGHT", -7 + o, 7 - o)
+  end
+  Place()
+  b:SetScript("OnMouseDown", function() Place(true) end)
+  b:SetScript("OnMouseUp", function() Place() end)
   b:SetScript("OnClick", OpenSearch)
   b:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetText("Chat durchsuchen")
-    GameTooltip:AddLine("Durchsucht den Chat der letzten 7 Tage (/ck)", 1, 1, 1); GameTooltip:Show()
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetText("Search chat")
+    GameTooltip:AddLine("Search the last 7 days of chat (/ck)", 1, 1, 1); GameTooltip:Show()
   end)
   b:SetScript("OnLeave", function() GameTooltip:Hide() end)
 end
